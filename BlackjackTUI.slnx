@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/BlackjackTUI/BlackjackTUI.fsproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/BlackjackTUI.Tests/BlackjackTUI.Tests.fsproj" />
+  </Folder>
+</Solution>

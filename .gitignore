@@ -1,0 +1,19 @@
+# .NET build artifacts
+bin/
+obj/
+out/
+*.user
+*.suo
+*.userprefs
+.vs/
+.vscode/
+.idea/
+
+# F# / .NET test
+TestResults/
+*.coverage
+*.coveragexml
+
+# OS
+.DS_Store
+Thumbs.db
