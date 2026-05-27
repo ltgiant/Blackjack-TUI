@@ -2,6 +2,8 @@
 
 A terminal-based blackjack game written in F#. The player starts with $100 and tries to reach $1,000 by playing rounds against a dealer.
 
+The project grows from a strict, spec-faithful implementation ([`v1.0.0`](#versions)) into a fully styled Spectre.Console TUI with a home menu, an in-app tutorial, and persistent stats stored in SQLite ([`v2.2.0`](#versions)). Game rules and the original 31 spec tests are preserved at every step.
+
 ## Game Rules
 
 - **Starting money:** $100
@@ -64,7 +66,22 @@ dotnet run --project src/BlackjackTUI/BlackjackTUI.fsproj
 dotnet test BlackjackTUI.slnx
 ```
 
-## Example Session
+### How to play (current release)
+
+The game opens on a home screen. Navigate with the arrow keys and confirm with **Enter**.
+
+- **Start Game** — play a session from $100 toward the $1,000 goal. Type a bet, then arrow-select `hit` or `stand` each turn. Finishing (win or lose) returns you to the home screen, so multiple sessions can be played back-to-back.
+- **How to Play** — a 3-page in-app tutorial (Basics → Card Values → Rules & Controls) with **Prev / Next / Back to Home** navigation.
+- **Stats** — aggregates collected from completed games. Includes a confirmation-gated **Reset Stats** action.
+- **Quit** — exits the program.
+
+Stats are stored locally at `~/.blackjack-tui/stats.db` (SQLite). Delete the file to wipe history without entering the app.
+
+## Example Sessions
+
+### v1.0.0 — spec-faithful, plain text
+
+This is the original session format described in `docs/SPEC1.pdf`. It is preserved exactly in the `v1.0.0` tag.
 
 ```
 === Blackjack TUI ===
@@ -94,6 +111,108 @@ Money: $80
 
 Enter your bet:
 ```
+
+To reproduce: `git checkout v1.0.0 && dotnet run --project src/BlackjackTUI/BlackjackTUI.fsproj`.
+
+### v2.2.0 — Spectre.Console TUI (current)
+
+The current release renders the game as a full TUI: ANSI-colored card boxes, panels, and arrow-key menus. Below is an approximation of what each screen looks like.
+
+**Home screen**
+
+```
+ ____  _            _    _            _
+| __ )| | __ _  ___| | _(_) __ _  ___| | __
+|  _ \| |/ _` |/ __| |/ / |/ _` |/ __| |/ /
+| |_) | | (_| | (__|   <| | (_| | (__|   <
+|____/|_|\__,_|\___|_|\_\_|\__,_|\___|_|\_\
+
+─────────────── F# TUI Edition ─────────────
+
+╭── Welcome ──────────────────────────────╮
+│ Beat the dealer and grow your bankroll  │
+│ from $100 to $1000.                     │
+╰─────────────────────────────────────────╯
+
+What would you like to do?
+> Start Game
+  How to Play
+  Stats
+  Quit
+```
+
+**During a round** (player hand shown, one dealer card hidden)
+
+```
+╭── Money ────────────────────────────────╮
+│ $100  (goal: $1000)                     │
+╰─────────────────────────────────────────╯
+Bet: $20
+
+Dealer  (?)
+┌─────┐ ┌─────┐
+│K    │ │░░░░░│
+│  ♦  │ │░ ? ░│
+│    K│ │░░░░░│
+└─────┘ └─────┘
+
+Player  (17)
+┌─────┐ ┌─────┐
+│10   │ │7    │
+│  ♠  │ │  ♥  │
+│   10│ │    7│
+└─────┘ └─────┘
+
+Your action:
+> hit
+  stand
+```
+
+**After the dealer plays out** (cards revealed, outcome panel)
+
+```
+Dealer  (21)
+┌─────┐ ┌─────┐ ┌─────┐
+│K    │ │6    │ │5    │
+│  ♦  │ │  ♣  │ │  ♠  │
+│    K│ │    6│ │    5│
+└─────┘ └─────┘ └─────┘
+
+Player  (17)
+┌─────┐ ┌─────┐
+│10   │ │7    │
+│  ♠  │ │  ♥  │
+│   10│ │    7│
+└─────┘ └─────┘
+
+╭─────────────────────────────────────────╮
+│ Dealer wins.                            │
+╰─────────────────────────────────────────╯
+Money: $100  →  $80
+
+Press Enter to continue…
+```
+
+**Stats screen** (after a few completed games)
+
+```
+╭── Game Stats ──────────────╮ ╭── Round Stats ─────╮
+│ Total games:      12       │ │ Total rounds:  87  │
+│ Wins:              4       │ │ Average bet: $24.5 │
+│ Losses:            8       │ │ Bust rate:    18%  │
+│ Win rate:         33%      │ │ Hit rate:     42%  │
+│ Avg final money:  $310     │ │ Stand rate:   58%  │
+│ Best run:         $540     │ ╰────────────────────╯
+│ Worst run:        $0       │
+│ Longest streak: 5 rounds   │
+╰────────────────────────────╯
+
+Stats actions:
+> Back to Home
+  Reset Stats
+```
+
+> The actual terminal output is colored (♥♦ red, ♠♣ white, headings styled) and the card boxes are drawn with unicode line-drawing characters — the snippets above are ASCII-only approximations.
 
 ## Design Notes
 
