@@ -4,6 +4,7 @@ open Xunit
 open BlackjackTUI.Domain
 open BlackjackTUI.Deck
 open BlackjackTUI.Game
+open BlackjackTUI.Stats
 
 let card s r = { Suit = s; Rank = r }
 
@@ -175,3 +176,100 @@ let ``formatCard: ten of spades`` () =
 let ``formatHand: shows cards and total`` () =
     let h = [ card Spades Ten; card Hearts Seven ]
     Assert.Equal("[10♠, 7♥] (17)", formatHand h)
+
+// ===== Stats tests (in-memory SQLite) =====
+
+let private openMem () : Db =
+    // shared cache name keeps in-memory db alive for the connection
+    let conn = new Microsoft.Data.Sqlite.SqliteConnection("DataSource=:memory:")
+    conn.Open()
+    let db = { Connection = conn }
+    ensureSchema db
+    db
+
+let private makeRound (n: int) (bet: int) (outcome: RoundOutcome) (before: int) (after: int) (hits: int) (stood: bool) : RoundRecord =
+    { RoundNo = n
+      Bet = bet
+      PlayerValue = 18
+      DealerValue = 17
+      Outcome = outcome
+      MoneyBefore = before
+      MoneyAfter = after
+      Hits = hits
+      Stood = stood }
+
+[<Fact>]
+let ``stats: empty db returns emptySummary`` () =
+    use db = openMem ()
+    let s = getSummary db
+    Assert.Equal(0, s.TotalGames)
+    Assert.Equal(0, s.Wins)
+    Assert.Equal(0, s.Losses)
+    Assert.Equal(0, s.TotalRounds)
+
+[<Fact>]
+let ``stats: ongoing games are excluded from summary`` () =
+    use db = openMem ()
+    let _ = beginGame db  // never ended
+    let s = getSummary db
+    Assert.Equal(0, s.TotalGames)
+
+[<Fact>]
+let ``stats: counts wins and losses correctly`` () =
+    use db = openMem ()
+    let g1 = beginGame db
+    recordRound db g1 (makeRound 1 50 PlayerWins 100 150 0 true)
+    endGame db g1 Won 1020
+
+    let g2 = beginGame db
+    recordRound db g2 (makeRound 1 100 DealerWins 100 0 1 false)
+    endGame db g2 Lost 0
+
+    let s = getSummary db
+    Assert.Equal(2, s.TotalGames)
+    Assert.Equal(1, s.Wins)
+    Assert.Equal(1, s.Losses)
+    Assert.Equal(0.5, s.WinRate)
+    Assert.Equal(1020, s.MaxFinalMoney)
+    Assert.Equal(0, s.MinFinalMoney)
+
+[<Fact>]
+let ``stats: longest win streak across rounds`` () =
+    use db = openMem ()
+    let g = beginGame db
+    recordRound db g (makeRound 1 10 PlayerWins 100 110 0 true)
+    recordRound db g (makeRound 2 10 DealerBust 110 120 1 true)
+    recordRound db g (makeRound 3 10 PlayerWins 120 130 0 true)
+    recordRound db g (makeRound 4 10 DealerWins 130 120 0 true)   // streak resets
+    recordRound db g (makeRound 5 10 PlayerWins 120 130 0 true)
+    recordRound db g (makeRound 6 10 PlayerWins 130 140 0 true)
+    endGame db g Won 1000
+    let s = getSummary db
+    Assert.Equal(3, s.LongestWinStreak)
+
+[<Fact>]
+let ``stats: bust rate and hit rate`` () =
+    use db = openMem ()
+    let g = beginGame db
+    // 4 rounds: 1 bust, 3 stand-ends. total hits = 2, stands = 3.
+    recordRound db g (makeRound 1 10 PlayerBust 100 90 2 false)
+    recordRound db g (makeRound 2 10 PlayerWins 90 100 0 true)
+    recordRound db g (makeRound 3 10 PlayerWins 100 110 0 true)
+    recordRound db g (makeRound 4 10 PlayerWins 110 120 0 true)
+    endGame db g Lost 50
+    let s = getSummary db
+    Assert.Equal(4, s.TotalRounds)
+    Assert.Equal(0.25, s.BustRate)
+    // hits 2, stood 3, hit rate = 2/5 = 0.4
+    Assert.Equal(0.4, s.HitRate)
+
+[<Fact>]
+let ``stats: reset clears all data`` () =
+    use db = openMem ()
+    let g = beginGame db
+    recordRound db g (makeRound 1 10 PlayerWins 100 110 0 true)
+    endGame db g Won 1000
+    resetStats db
+    let s = getSummary db
+    Assert.Equal(0, s.TotalGames)
+    Assert.Equal(0, s.TotalRounds)

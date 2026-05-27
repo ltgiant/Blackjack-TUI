@@ -6,6 +6,7 @@ open Spectre.Console
 open BlackjackTUI.Domain
 open BlackjackTUI.Deck
 open BlackjackTUI.Game
+open BlackjackTUI.Stats
 open BlackjackTUI.View
 open BlackjackTUI.Screens
 
@@ -23,18 +24,20 @@ let private redrawTable (money: int) (bet: int) (player: Hand) (dealer: Hand) (h
     AnsiConsole.WriteLine()
     writePlayerHand player
 
-let rec private playerTurn (money: int) (bet: int) (player: Hand) (dealer: Hand) (deck: Card list)
-    : Hand * Card list * bool =
+// player turn: tracks hit count and whether the player ended on stand
+let rec private playerTurn
+    (money: int) (bet: int) (player: Hand) (dealer: Hand) (deck: Card list) (hits: int)
+    : Hand * Card list * int * bool * bool =
     redrawTable money bet player dealer true
     if isBust player then
-        player, deck, true
+        player, deck, hits, false, true   // hits, stood=false, busted=true
     else
         let action = promptAction ()
         if action = "hit" then
             let card, rest = drawCard deck
-            playerTurn money bet (player @ [ card ]) dealer rest
+            playerTurn money bet (player @ [ card ]) dealer rest (hits + 1)
         else
-            player, deck, false
+            player, deck, hits, true, false   // stood=true, busted=false
 
 let private dealerTurn (money: int) (bet: int) (player: Hand) (dealer: Hand) (deck: Card list)
     : Hand * Card list =
@@ -50,7 +53,7 @@ let private dealerTurn (money: int) (bet: int) (player: Hand) (dealer: Hand) (de
             dealer, deck
     loop dealer deck
 
-let private playRound (rng: Random) (money: int) : int =
+let private playRound (db: Db) (gameId: GameId) (roundNo: int) (rng: Random) (money: int) : int =
     AnsiConsole.Clear()
     writeHeader ()
     writeMoney money
@@ -62,7 +65,7 @@ let private playRound (rng: Random) (money: int) : int =
     let player, deck = drawN 2 deck
     let dealer, deck = drawN 2 deck
 
-    let player, deck, busted = playerTurn money bet player dealer deck
+    let player, deck, hits, stood, busted = playerTurn money bet player dealer deck 0
 
     let finalDealer =
         if busted then dealer
@@ -78,15 +81,29 @@ let private playRound (rng: Random) (money: int) : int =
     AnsiConsole.WriteLine()
     AnsiConsole.MarkupLine(
         sprintf "[bold]Money:[/] [green]$%d[/]  →  [bold]$%d[/]" money newMoney)
+
+    recordRound db gameId
+        { RoundNo = roundNo
+          Bet = bet
+          PlayerValue = handValue player
+          DealerValue = handValue finalDealer
+          Outcome = outcome
+          MoneyBefore = money
+          MoneyAfter = newMoney
+          Hits = hits
+          Stood = stood }
+
     AnsiConsole.WriteLine()
     AnsiConsole.MarkupLine("[grey]Press [bold]Enter[/] to continue…[/]")
     Console.ReadLine() |> ignore
     newMoney
 
-let private playFullGame (rng: Random) : unit =
-    let rec rounds money =
+let private playFullGame (db: Db) (rng: Random) : unit =
+    let gameId = beginGame db
+    let rec rounds roundNo money =
         match gameStatus money with
         | Won ->
+            endGame db gameId Won money
             AnsiConsole.Clear()
             writeHeader ()
             writeGameWon money
@@ -94,6 +111,7 @@ let private playFullGame (rng: Random) : unit =
             AnsiConsole.MarkupLine("[grey]Press [bold]Enter[/] to return to home…[/]")
             Console.ReadLine() |> ignore
         | Lost ->
+            endGame db gameId Lost money
             AnsiConsole.Clear()
             writeHeader ()
             writeGameLost ()
@@ -101,13 +119,15 @@ let private playFullGame (rng: Random) : unit =
             AnsiConsole.MarkupLine("[grey]Press [bold]Enter[/] to return to home…[/]")
             Console.ReadLine() |> ignore
         | Ongoing ->
-            rounds (playRound rng money)
-    rounds StartingMoney
+            let next = playRound db gameId roundNo rng money
+            rounds (roundNo + 1) next
+    rounds 1 StartingMoney
 
 [<EntryPoint>]
 let main _ =
     Console.OutputEncoding <- Text.Encoding.UTF8
     let rng = Random()
+    let db = openDb (defaultPath ())
 
     let rec loop screen =
         match screen with
@@ -118,11 +138,15 @@ let main _ =
             tutorial ()
             loop Home
         | Game ->
-            playFullGame rng
+            playFullGame db rng
+            loop Home
+        | Stats ->
+            stats db
             loop Home
         | Quit ->
             AnsiConsole.Clear()
             AnsiConsole.MarkupLine("[grey]Thanks for playing. See you next time![/]")
 
-    loop Home
+    try loop Home
+    finally close db
     0

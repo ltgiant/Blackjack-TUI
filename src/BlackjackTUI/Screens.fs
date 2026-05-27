@@ -3,15 +3,17 @@ module BlackjackTUI.Screens
 open Spectre.Console
 open BlackjackTUI.Domain
 open BlackjackTUI.View
+open BlackjackTUI.Stats
 
 type Screen =
     | Home
     | Tutorial
     | Game
+    | Stats
     | Quit
 
 [<Literal>]
-let Version = "v2.1.0"
+let Version = "v2.2.0"
 
 let private drawHomeIntro () =
     AnsiConsole.Clear()
@@ -32,12 +34,13 @@ let home () : Screen =
     let menu =
         SelectionPrompt<string>()
             .Title("[bold]What would you like to do?[/]")
-            .AddChoices([| "Start Game"; "How to Play"; "Quit" |])
+            .AddChoices([| "Start Game"; "How to Play"; "Stats"; "Quit" |])
     let choice = AnsiConsole.Prompt(menu)
     drawFooter ()
     match choice with
     | "Start Game" -> Game
     | "How to Play" -> Tutorial
+    | "Stats" -> Stats
     | _ -> Quit
 
 type private NavChoice =
@@ -144,3 +147,72 @@ let tutorial () =
         | Next -> loop (min total (page + 1))
         | BackHome -> ()
     loop 1
+
+let private pct (x: float) = sprintf "%.0f%%" (x * 100.0)
+
+let private gameStatsPanel (s: SummaryStats) =
+    let body =
+        Markup(
+            sprintf "[bold]Total games:[/]      [cyan]%d[/]\n" s.TotalGames +
+            sprintf "[bold]Wins:[/]             [green]%d[/]\n" s.Wins +
+            sprintf "[bold]Losses:[/]           [red]%d[/]\n" s.Losses +
+            sprintf "[bold]Win rate:[/]         [yellow]%s[/]\n" (pct s.WinRate) +
+            sprintf "[bold]Avg final money:[/]  [white]$%.0f[/]\n" s.AvgFinalMoney +
+            sprintf "[bold]Best run:[/]         [green]$%d[/]\n" s.MaxFinalMoney +
+            sprintf "[bold]Worst run:[/]        [red]$%d[/]\n" s.MinFinalMoney +
+            sprintf "[bold]Longest streak:[/]   [magenta]%d rounds[/]" s.LongestWinStreak)
+    Panel(body).Header("[bold]Game Stats[/]").RoundedBorder()
+
+let private roundStatsPanel (s: SummaryStats) =
+    let body =
+        Markup(
+            sprintf "[bold]Total rounds:[/]     [cyan]%d[/]\n" s.TotalRounds +
+            sprintf "[bold]Average bet:[/]      [white]$%.1f[/]\n" s.AvgBet +
+            sprintf "[bold]Bust rate:[/]        [red]%s[/]\n" (pct s.BustRate) +
+            sprintf "[bold]Hit rate:[/]         [yellow]%s[/]\n" (pct s.HitRate) +
+            sprintf "[bold]Stand rate:[/]       [green]%s[/]" (pct (1.0 - s.HitRate)))
+    Panel(body).Header("[bold]Round Stats[/]").RoundedBorder()
+
+let private confirmReset () : bool =
+    let prompt =
+        ConfirmationPrompt("[red]Really reset all stats?[/]")
+    prompt.DefaultValue <- false
+    AnsiConsole.Prompt(prompt)
+
+type private StatsChoice =
+    | Back
+    | Reset
+
+let stats (db: Db) =
+    let rec loop () =
+        AnsiConsole.Clear()
+        writeHeader ()
+        let summary = getSummary db
+        if summary.TotalGames = 0 then
+            AnsiConsole.Write(
+                Panel(Markup("[grey italic]No completed games yet. Play some hands first![/]"))
+                    .Header("[bold]Stats[/]")
+                    .RoundedBorder())
+        else
+            let columns = Columns(gameStatsPanel summary, roundStatsPanel summary)
+            AnsiConsole.Write(columns)
+        AnsiConsole.WriteLine()
+        let menu =
+            SelectionPrompt<string>()
+                .Title("[grey]Stats actions:[/]")
+                .AddChoices([| "Back to Home"; "Reset Stats" |])
+        let picked = AnsiConsole.Prompt(menu)
+        let choice =
+            match picked with
+            | "Reset Stats" -> Reset
+            | _ -> Back
+        match choice with
+        | Back -> ()
+        | Reset ->
+            if confirmReset () then
+                resetStats db
+                AnsiConsole.MarkupLine("[green]Stats cleared.[/]")
+                AnsiConsole.MarkupLine("[grey]Press [bold]Enter[/] to continue…[/]")
+                System.Console.ReadLine() |> ignore
+            loop ()
+    loop ()
