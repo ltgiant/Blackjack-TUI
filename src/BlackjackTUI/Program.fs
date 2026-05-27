@@ -1,117 +1,102 @@
 module BlackjackTUI.Program
 
 open System
+open System.Threading
+open Spectre.Console
 open BlackjackTUI.Domain
 open BlackjackTUI.Deck
 open BlackjackTUI.Game
+open BlackjackTUI.View
 
-let rec readBet (money: int) : int =
-    Console.WriteLine()
-    Console.WriteLine("Enter your bet:")
-    Console.WriteLine()
-    let line = Console.ReadLine()
-    match Int32.TryParse(if isNull line then "" else line.Trim()) with
-    | true, bet when isValidBet money bet -> bet
-    | _ ->
-        Console.WriteLine()
-        Console.WriteLine("Invalid bet. Must be > 0 and <= your money.")
-        readBet money
+let private pause (ms: int) =
+    if not (Console.IsInputRedirected) then Thread.Sleep(ms)
 
-let rec readAction () : string =
-    Console.WriteLine()
-    Console.WriteLine("Action (hit/stand):")
-    Console.WriteLine()
-    let line = Console.ReadLine()
-    let s = if isNull line then "" else line.Trim().ToLowerInvariant()
-    match s with
-    | "hit" | "stand" -> s
-    | _ ->
-        Console.WriteLine()
-        Console.WriteLine("Invalid action. Type 'hit' or 'stand'.")
-        readAction ()
+let private redrawTable (money: int) (bet: int) (player: Hand) (dealer: Hand) (hideDealer: bool) =
+    AnsiConsole.Clear()
+    writeHeader ()
+    writeMoney money
+    AnsiConsole.MarkupLine(sprintf "[bold]Bet:[/] [yellow]$%d[/]" bet)
+    AnsiConsole.WriteLine()
+    if hideDealer then writeDealerHandHidden dealer
+    else writeDealerHand dealer
+    AnsiConsole.WriteLine()
+    writePlayerHand player
 
-let rec playerTurn (playerHand: Hand) (deck: Card list) : Hand * Card list * bool =
-    let action = readAction ()
-    if action = "hit" then
-        let card, rest = drawCard deck
-        let newHand = playerHand @ [ card ]
-        Console.WriteLine()
-        Console.WriteLine(sprintf "Player cards: %s" (formatHand newHand))
-        if isBust newHand then
-            newHand, rest, true
-        else
-            playerTurn newHand rest
+let rec private playerTurn (money: int) (bet: int) (player: Hand) (dealer: Hand) (deck: Card list)
+    : Hand * Card list * bool =
+    redrawTable money bet player dealer true
+    if isBust player then
+        player, deck, true
     else
-        playerHand, deck, false
-
-let runDealerTurn (dealerHand: Hand) (deck: Card list) : Hand * Card list =
-    Console.WriteLine()
-    Console.WriteLine(sprintf "Dealer cards: %s" (formatHand dealerHand))
-    let rec loop hand d =
-        if handValue hand < 17 then
-            Console.WriteLine("Dealer hits…")
-            let card, rest = drawCard d
-            let next = hand @ [ card ]
-            Console.WriteLine(sprintf "Dealer cards: %s" (formatHand next))
-            loop next rest
+        let action = promptAction ()
+        if action = "hit" then
+            let card, rest = drawCard deck
+            playerTurn money bet (player @ [ card ]) dealer rest
         else
-            hand, d
-    loop dealerHand deck
+            player, deck, false
 
-let printOutcome (outcome: RoundOutcome) =
-    Console.WriteLine()
-    match outcome with
-    | PlayerBust -> Console.WriteLine("Bust! You lose.")
-    | DealerBust -> Console.WriteLine("Dealer busts. You win.")
-    | PlayerWins -> Console.WriteLine("You win.")
-    | DealerWins -> Console.WriteLine("Dealer wins.")
-    | Push -> Console.WriteLine("Push.")
+let private dealerTurn (money: int) (bet: int) (player: Hand) (dealer: Hand) (deck: Card list)
+    : Hand * Card list =
+    let rec loop dealer deck =
+        redrawTable money bet player dealer false
+        pause 700
+        if handValue dealer < 17 then
+            writeDealerHits ()
+            pause 500
+            let card, rest = drawCard deck
+            loop (dealer @ [ card ]) rest
+        else
+            dealer, deck
+    loop dealer deck
 
-let playRound (rng: Random) (money: int) : int =
-    Console.WriteLine()
-    Console.WriteLine(sprintf "Money: $%d" money)
+let private playRound (rng: Random) (money: int) : int =
+    AnsiConsole.Clear()
+    writeHeader ()
+    writeMoney money
+    AnsiConsole.WriteLine()
 
-    let bet = readBet money
+    let bet = promptBet money
 
     let deck = createDeck () |> shuffle rng
-    let playerCards, deck = drawN 2 deck
-    let dealerCards, deck = drawN 2 deck
+    let player, deck = drawN 2 deck
+    let dealer, deck = drawN 2 deck
 
-    Console.WriteLine()
-    Console.WriteLine(sprintf "Player cards: %s" (formatHand playerCards))
-    Console.WriteLine(sprintf "Dealer shows: [%s]" (formatCard dealerCards.[0]))
+    let player, deck, busted = playerTurn money bet player dealer deck
 
-    let playerHand, deck, busted = playerTurn playerCards deck
+    let finalDealer =
+        if busted then dealer
+        else
+            let d, _ = dealerTurn money bet player dealer deck
+            d
 
-    let dealerHand, _ =
-        if busted then dealerCards, deck
-        else runDealerTurn dealerCards deck
+    redrawTable money bet player finalDealer false
 
-    let outcome = determineOutcome playerHand dealerHand
-    printOutcome outcome
-
+    let outcome = determineOutcome player finalDealer
+    writeOutcome outcome
     let newMoney = applyOutcome money bet outcome
-    Console.WriteLine()
-    Console.WriteLine(sprintf "Money: $%d" newMoney)
-    Console.WriteLine()
-    Console.WriteLine("────")
+    AnsiConsole.WriteLine()
+    AnsiConsole.MarkupLine(
+        sprintf "[bold]Money:[/] [green]$%d[/]  →  [bold]$%d[/]" money newMoney)
+    AnsiConsole.WriteLine()
+    AnsiConsole.MarkupLine("[grey]Press [bold]Enter[/] to continue…[/]")
+    Console.ReadLine() |> ignore
     newMoney
 
 [<EntryPoint>]
 let main _ =
     Console.OutputEncoding <- Text.Encoding.UTF8
-    Console.WriteLine("=== Blackjack TUI ===")
-
     let rng = Random()
 
     let rec loop money =
         match gameStatus money with
         | Won ->
-            Console.WriteLine()
-            Console.WriteLine(sprintf "You reached $%d. You win the game!" money)
+            AnsiConsole.Clear()
+            writeHeader ()
+            writeGameWon money
         | Lost ->
-            Console.WriteLine()
-            Console.WriteLine("You ran out of money. Game over.")
+            AnsiConsole.Clear()
+            writeHeader ()
+            writeGameLost ()
         | Ongoing ->
             let next = playRound rng money
             loop next
