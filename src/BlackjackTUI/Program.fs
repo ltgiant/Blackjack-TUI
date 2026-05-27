@@ -7,6 +7,7 @@ open BlackjackTUI.Domain
 open BlackjackTUI.Deck
 open BlackjackTUI.Game
 open BlackjackTUI.View
+open BlackjackTUI.Screens
 
 let private pause (ms: int) =
     if not (Console.IsInputRedirected) then Thread.Sleep(ms)
@@ -82,24 +83,46 @@ let private playRound (rng: Random) (money: int) : int =
     Console.ReadLine() |> ignore
     newMoney
 
-[<EntryPoint>]
-let main _ =
-    Console.OutputEncoding <- Text.Encoding.UTF8
-    let rng = Random()
-
-    let rec loop money =
+let private playFullGame (rng: Random) : unit =
+    let rec rounds money =
         match gameStatus money with
         | Won ->
             AnsiConsole.Clear()
             writeHeader ()
             writeGameWon money
+            AnsiConsole.WriteLine()
+            AnsiConsole.MarkupLine("[grey]Press [bold]Enter[/] to return to home…[/]")
+            Console.ReadLine() |> ignore
         | Lost ->
             AnsiConsole.Clear()
             writeHeader ()
             writeGameLost ()
+            AnsiConsole.WriteLine()
+            AnsiConsole.MarkupLine("[grey]Press [bold]Enter[/] to return to home…[/]")
+            Console.ReadLine() |> ignore
         | Ongoing ->
-            let next = playRound rng money
-            loop next
+            rounds (playRound rng money)
+    rounds StartingMoney
 
-    loop StartingMoney
+[<EntryPoint>]
+let main _ =
+    Console.OutputEncoding <- Text.Encoding.UTF8
+    let rng = Random()
+
+    let rec loop screen =
+        match screen with
+        | Home ->
+            let next = home ()
+            loop next
+        | Tutorial ->
+            tutorial ()
+            loop Home
+        | Game ->
+            playFullGame rng
+            loop Home
+        | Quit ->
+            AnsiConsole.Clear()
+            AnsiConsole.MarkupLine("[grey]Thanks for playing. See you next time![/]")
+
+    loop Home
     0

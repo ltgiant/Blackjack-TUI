@@ -10,6 +10,7 @@
     <Compile Include="Deck.fs" />
     <Compile Include="Game.fs" />
     <Compile Include="View.fs" />
+    <Compile Include="Screens.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 
